@@ -1,0 +1,6 @@
+Cắm ESP32.
+Cmd1:cd "C:\Program Files\mosquitto"
+	mosquitto -c mosquitto.conf -v
+Cmd2:ipconfig
+WSL: cd fire-alert
+	node server.js

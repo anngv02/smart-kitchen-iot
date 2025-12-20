@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fire & Gas Dashboard</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+            width: 350px;
+        }
+        h1 { color: #333; margin-bottom: 30px; }
+        
+        .status-box {
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            font-weight: bold;
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+        }
+        
+        /* Trạng thái */
+        .safe { background-color: #27ae60; box-shadow: 0 5px 15px rgba(39, 174, 96, 0.4); }
+        .danger { 
+            background-color: #c0392b; 
+            box-shadow: 0 5px 15px rgba(192, 57, 43, 0.4);
+            animation: pulse 1s infinite;
+        }
+
+        .sensor-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 10px;
+            background: #ecf0f1;
+            border-radius: 5px;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>🔥 IoT Fire Alert</h1>
+        
+        <div id="mainStatus" class="status-box safe">
+            AN TOÀN
+        </div>
+
+        <div class="sensor-info">
+            <div class="sensor-row">
+                <span>Khí Gas (MQ2):</span>
+                <strong id="gasVal" style="color: green">Bình thường</strong>
+            </div>
+            <div class="sensor-row">
+                <span>Cảm biến Lửa:</span>
+                <strong id="fireVal" style="color: green">Bình thường</strong>
+            </div>
+            <pre id="rawData" style="text-align:left; background:#f7f9fb; padding:8px; border-radius:6px; margin-top:10px; max-height:140px; overflow:auto; font-size:0.85em;">No data yet</pre>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io(); 
+        
+        const mainStatus = document.getElementById('mainStatus');
+        const gasLabel = document.getElementById('gasVal');
+        const fireLabel = document.getElementById('fireVal');
+
+        const rawData = document.getElementById('rawData');
+
+        socket.on('sensor_data', (data) => {
+            console.log('Data mới:', data);
+            rawData.textContent = JSON.stringify(data, null, 2);
+
+            const hasGas = data.gas;
+            const hasFire = data.fire;
+
+            if (hasGas) {
+                gasLabel.innerText = "PHÁT HIỆN!";
+                gasLabel.style.color = "red";
+            } else {
+                gasLabel.innerText = "Bình thường";
+                gasLabel.style.color = "green";
+            }
+
+            if (hasFire) {
+                fireLabel.innerText = "CÓ LỬA!";
+                fireLabel.style.color = "red";
+            } else {
+                fireLabel.innerText = "Bình thường";
+                fireLabel.style.color = "green";
+            }
+
+            if (hasGas || hasFire) {
+                mainStatus.innerText = "NGUY HIỂM !!!";
+                mainStatus.className = "status-box danger";
+            } else {
+                mainStatus.innerText = "AN TOÀN";
+                mainStatus.className = "status-box safe";
+            }
+        });
+    </script>
+</body>
+</html>
