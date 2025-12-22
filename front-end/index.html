@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Smart Kitchen Dashboard</title>
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- Socket.IO client (kept as CDN) -->
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  
+  <!-- Chart.js for temperature charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- Main app (ES modules) -->
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
