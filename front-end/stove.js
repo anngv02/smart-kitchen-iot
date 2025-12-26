@@ -57,24 +57,47 @@ client.on('message', (topic, message) => {
     }
 });
 
+// Hàm tính nhiệt độ tối đa cho mỗi level (0-9)
+// Level 0: 30°C (tắt), Level 1-9: từ 60°C đến 300°C
+function getMaxTemperatureForLevel(level) {
+    if (level === 0) return 30.0; // Nhiệt độ phòng khi tắt
+    // Phân bổ đều: 30°C (phòng) + (level * 30°C)
+    // Level 1: 60°C, Level 2: 90°C, ..., Level 9: 300°C
+    return 30.0 + (level * 30.0);
+}
+
 // Hàm mô phỏng nhiệt độ tăng giảm
 function physicsLoop() {
-    if (state.power === "ON") {
-        // Giả lập: Level càng cao nóng càng nhanh
-        let target = 30 + (state.level * 25);
-        if (state.temperature < target) state.temperature += 2.5;
+    if (state.power === "ON" && state.level > 0) {
+        // Tính nhiệt độ tối đa cho level hiện tại
+        const maxTemp = getMaxTemperatureForLevel(state.level);
+        
+        // Nhiệt độ tăng dần đến mức tối đa của level
+        // Tốc độ tăng phụ thuộc vào level (level cao hơn tăng nhanh hơn)
+        if (state.temperature < maxTemp) {
+            const increment = 1.0 + (state.level * 0.5); // Level cao tăng nhanh hơn
+            state.temperature = Math.min(state.temperature + increment, maxTemp);
+        }
+        // Nếu nhiệt độ đã đạt mức tối đa, giữ nguyên
+        state.target_temp = maxTemp;
     } else {
-        // Tắt bếp thì nguội dần
-        if (state.temperature > 30) state.temperature -= 1.0;
+        // Tắt bếp (POWER OFF hoặc level 0) thì nguội dần về 30°C
+        if (state.temperature > 30) {
+            state.temperature -= 1.0;
+            if (state.temperature < 30) state.temperature = 30.0;
+        }
+        state.target_temp = 30.0;
     }
     
     // Làm tròn
     state.temperature = Math.round(state.temperature * 10) / 10;
+    state.target_temp = Math.round(state.target_temp * 10) / 10;
 
     // Gửi trạng thái hiện tại lên Server (để App hiển thị)
     const payload = JSON.stringify(state);
     client.publish(`${DEVICE_TOPIC}/status`, payload);
     
     // In ra màn hình console (ghi đè dòng cũ cho đẹp)
-    process.stdout.write(`\r🔥 [STOVE SIM] Temp: ${state.temperature}°C | Power: ${state.power} | Level: ${state.level}   `);
+    const maxTemp = state.power === "ON" && state.level > 0 ? getMaxTemperatureForLevel(state.level) : 30;
+    process.stdout.write(`\r🔥 [STOVE SIM] Temp: ${state.temperature}°C / Max: ${maxTemp}°C | Power: ${state.power} | Level: ${state.level}   `);
 }
