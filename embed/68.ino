@@ -56,7 +56,7 @@ void setup_wifi() {
   }
   
   Serial.println("\nWiFi Connected");
-  secured_client.setInsecure(); // Bỏ qua check chứng chỉ SSL cho Telegram (Nhanh hơn)
+  secured_client.setInsecure(); 
 }
 
 void reconnect_mqtt() {

@@ -8,51 +8,56 @@ export function createDeviceManager(token, { addDevice, updateDevice, deleteDevi
     <div class="device-manager-content">
       <div class="device-manager-header">
         <h2>Quản lý Thiết bị</h2>
-        <button class="close-btn">&times;</button>
+        <button class="close-btn">✕</button>
       </div>
       
       <div class="device-manager-tabs">
-        <button class="tab-btn active" data-tab="add">Thêm Thiết bị</button>
-        <button class="tab-btn" data-tab="manage">Quản lý Thiết bị</button>
+        <button class="tab-btn active" data-tab="add">➕ Thêm mới</button>
+        <button class="tab-btn" data-tab="manage">📋 Danh sách</button>
       </div>
       
       <div id="tab-add" class="tab-content active">
         <form id="add-device-form">
           <div class="form-group">
-            <label>Tên thiết bị:</label>
+            <label>📝 Tên thiết bị</label>
             <input type="text" id="device-name" required placeholder="VD: Bếp Nhà Bếp 2">
           </div>
           <div class="form-group">
-            <label>Loại thiết bị:</label>
+            <label>🏷️ Loại thiết bị</label>
             <select id="device-type" required>
               <option value="">Chọn loại...</option>
-              <option value="stove_sim">Bếp từ</option>
-              <option value="fridge_sim">Tủ lạnh</option>
+              <option value="stove_sim">🍳 Bếp từ</option>
+              <option value="fridge_sim">❄️ Tủ lạnh</option>
             </select>
           </div>
           <div class="form-group">
-            <label>MQTT Topic:</label>
-            <input type="text" id="device-topic" placeholder="home/kitchen/..." style="background-color: #fff;">
-            <small style="color: #666; font-size: 12px;">Topic sẽ được tạo tự động, nhưng bạn có thể chỉnh sửa nếu cần</small>
+            <label>📡 MQTT Topic</label>
+            <input type="text" id="device-topic" placeholder="home/kitchen/...">
+            <small>Topic sẽ được tạo tự động, nhưng bạn có thể chỉnh sửa nếu cần</small>
           </div>
-          <button type="submit" class="btn-primary">Thêm Thiết bị</button>
+          <button type="submit" class="btn-primary">🚀 Thêm Thiết bị</button>
         </form>
       </div>
       
       <div id="tab-manage" class="tab-content">
-        <div id="device-list-manage">Đang tải...</div>
+        <div id="device-list-manage">
+          <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+            <div style="font-size: 32px; margin-bottom: 12px;">🔄</div>
+            <div>Đang tải...</div>
+          </div>
+        </div>
       </div>
     </div>
   `;
 
-  // Tạo topic tự động
+  // Auto-generate topic
   const typeSelect = modal.querySelector('#device-type');
   const topicInput = modal.querySelector('#device-topic');
   const nameInput = modal.querySelector('#device-name');
   
   async function generateTopic(type) {
     try {
-      // Lấy danh sách thiết bị hiện có để tìm số tiếp theo
+      // Get current devices to find next number
       const res = await fetch(`${API_URL}/api/devices`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -71,7 +76,7 @@ export function createDeviceManager(token, { addDevice, updateDevice, deleteDevi
       const nextNum = existing.length > 0 ? Math.max(...existing) + 1 : 1;
       return `home/kitchen/${prefix}${nextNum}`;
     } catch (err) {
-      // Fallback nếu không lấy được danh sách
+      // Fallback if cannot get list
       const prefix = type === 'stove_sim' ? 'stove' : 'fridge';
       return `home/kitchen/${prefix}1`;
     }
@@ -123,18 +128,25 @@ export function createDeviceManager(token, { addDevice, updateDevice, deleteDevi
     const topic = topicInput.value;
     
     if (!name || !type || !topic) {
-      alert('Vui lòng điền đầy đủ thông tin');
+      showNotification('Vui lòng điền đầy đủ thông tin', 'warning');
       return;
     }
     
+    const submitBtn = addForm.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '⏳ Đang thêm...';
+    
     try {
       await addDevice(token, { name, type, mqtt_topic_root: topic });
-      alert('Thêm thiết bị thành công!');
+      showNotification('Thêm thiết bị thành công!', 'success');
       addForm.reset();
       topicInput.value = '';
       if (onDeviceChange) onDeviceChange();
     } catch (err) {
-      alert('Lỗi: ' + err.message);
+      showNotification('Lỗi: ' + err.message, 'error');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '🚀 Thêm Thiết bị';
     }
   });
 
@@ -155,24 +167,22 @@ export function createDeviceManager(token, { addDevice, updateDevice, deleteDevi
         item.className = 'device-manage-item';
         item.innerHTML = `
           <div class="device-info">
-            <strong>${dev.name}</strong>
+            <strong>${getTypeIcon(dev.type)} ${dev.name}</strong>
             <span class="device-type">${getTypeLabel(dev.type)}</span>
-            <div style="margin-top: 5px; font-size: 12px; color: #666;">
-              <strong>Topic:</strong> <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">${dev.mqtt_topic_root}</code>
-            </div>
+            <div class="device-topic">${dev.mqtt_topic_root}</div>
           </div>
           ${!isSensor ? `
             <div class="device-actions">
-              <button class="btn-edit-name" data-id="${dev._id}" data-name="${dev.name}">Đổi tên</button>
-              <button class="btn-edit-topic" data-id="${dev._id}" data-topic="${dev.mqtt_topic_root}">Đổi Topic</button>
-              <button class="btn-delete" data-id="${dev._id}">Xóa</button>
+              <button class="btn-edit" data-id="${dev._id}" data-name="${dev.name}">✏️ Tên</button>
+              <button class="btn-edit" data-action="topic" data-id="${dev._id}" data-topic="${dev.mqtt_topic_root}">📡 Topic</button>
+              <button class="btn-delete" data-id="${dev._id}">🗑️</button>
             </div>
-          ` : '<span class="readonly-badge">Chỉ đọc</span>'}
+          ` : '<span class="readonly-badge">🔒 Hardware</span>'}
         `;
         
         if (!isSensor) {
-          const editNameBtn = item.querySelector('.btn-edit-name');
-          const editTopicBtn = item.querySelector('.btn-edit-topic');
+          const editNameBtn = item.querySelector('.btn-edit:not([data-action])');
+          const editTopicBtn = item.querySelector('.btn-edit[data-action="topic"]');
           const deleteBtn = item.querySelector('.btn-delete');
           
           editNameBtn.addEventListener('click', () => {
@@ -187,7 +197,7 @@ export function createDeviceManager(token, { addDevice, updateDevice, deleteDevi
             if (newTopic && newTopic.trim() && newTopic !== dev.mqtt_topic_root) {
               // Validate topic format
               if (!newTopic.match(/^[a-zA-Z0-9\/_-]+$/)) {
-                alert('Topic không hợp lệ! Chỉ được chứa chữ cái, số, dấu gạch chéo (/), gạch dưới (_) và gạch ngang (-)');
+                showNotification('Topic không hợp lệ! Chỉ được chứa chữ cái, số, /, _ và -', 'error');
                 return;
               }
               updateDeviceTopic(dev._id, newTopic.trim());
@@ -205,43 +215,54 @@ export function createDeviceManager(token, { addDevice, updateDevice, deleteDevi
       });
       
       if (devices.length === 0) {
-        listContainer.innerHTML = '<p style="text-align:center; color:#999;">Chưa có thiết bị nào</p>';
+        listContainer.innerHTML = `
+          <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+            <div style="font-size: 48px; margin-bottom: 12px;">📭</div>
+            <div>Chưa có thiết bị nào</div>
+            <div style="font-size: 13px; margin-top: 8px; color: var(--text-muted);">Thêm thiết bị mới ở tab "Thêm mới"</div>
+          </div>
+        `;
       }
     } catch (err) {
-      listContainer.innerHTML = '<p style="color:red;">Lỗi tải danh sách thiết bị</p>';
+      listContainer.innerHTML = `
+        <div style="text-align: center; padding: 40px 20px; color: var(--danger);">
+          <div style="font-size: 48px; margin-bottom: 12px;">⚠️</div>
+          <div>Lỗi tải danh sách thiết bị</div>
+        </div>
+      `;
     }
   }
 
   async function updateDeviceName(id, newName) {
     try {
       await updateDevice(token, id, { name: newName });
-      alert('Đổi tên thành công!');
+      showNotification('Đổi tên thành công!', 'success');
       loadDeviceList();
       if (onDeviceChange) onDeviceChange();
     } catch (err) {
-      alert('Lỗi: ' + err.message);
+      showNotification('Lỗi: ' + err.message, 'error');
     }
   }
 
   async function updateDeviceTopic(id, newTopic) {
     try {
       await updateDevice(token, id, { mqtt_topic_root: newTopic });
-      alert('Đổi Topic thành công!');
+      showNotification('Đổi Topic thành công!', 'success');
       loadDeviceList();
       if (onDeviceChange) onDeviceChange();
     } catch (err) {
-      alert('Lỗi: ' + err.message);
+      showNotification('Lỗi: ' + err.message, 'error');
     }
   }
 
   async function deleteDeviceById(id) {
     try {
       await deleteDevice(token, id);
-      alert('Xóa thiết bị thành công!');
+      showNotification('Xóa thiết bị thành công!', 'success');
       loadDeviceList();
       if (onDeviceChange) onDeviceChange();
     } catch (err) {
-      alert('Lỗi: ' + err.message);
+      showNotification('Lỗi: ' + err.message, 'error');
     }
   }
 
@@ -252,6 +273,59 @@ export function createDeviceManager(token, { addDevice, updateDevice, deleteDevi
       'sensor_node': 'Cảm biến'
     };
     return labels[type] || type;
+  }
+
+  function getTypeIcon(type) {
+    const icons = {
+      'stove_sim': '🍳',
+      'fridge_sim': '❄️',
+      'sensor_node': '🚨'
+    };
+    return icons[type] || '📱';
+  }
+
+  // Notification helper
+  function showNotification(message, type = 'info') {
+    const existingToast = document.querySelector('.toast-notification');
+    if (existingToast) existingToast.remove();
+
+    const colors = {
+      info: 'var(--primary)',
+      warning: 'var(--warning)',
+      error: 'var(--danger)',
+      success: 'var(--success)'
+    };
+
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification';
+    toast.innerHTML = message;
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: ${colors[type] || colors.info};
+      color: white;
+      padding: 14px 28px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 9999;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      font-family: 'Quicksand', sans-serif;
+    `;
+    
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+      toast.style.transform = 'translateX(-50%) translateY(0)';
+    }, 10);
+    
+    setTimeout(() => {
+      toast.style.transform = 'translateX(-50%) translateY(100px)';
+      setTimeout(() => toast.remove(), 400);
+    }, 3000);
   }
 
   return {
@@ -267,4 +341,3 @@ export function createDeviceManager(token, { addDevice, updateDevice, deleteDevi
     }
   };
 }
-

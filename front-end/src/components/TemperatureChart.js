@@ -3,7 +3,7 @@ export function createTemperatureChart(container, deviceId, deviceType, token, g
   chartContainer.className = 'temperature-chart-container';
   chartContainer.innerHTML = `
     <div class="chart-header">
-      <h4>📊 Biểu đồ nhiệt độ  </h4>
+      <h4>📈 Biểu đồ nhiệt độ</h4>
       <div style="display:flex; gap:8px; align-items:center;">
         <select class="chart-range-select">
           <option value="8h">8 giờ</option>
@@ -11,7 +11,7 @@ export function createTemperatureChart(container, deviceId, deviceType, token, g
           <option value="3d">3 ngày</option>
           <option value="5d">5 ngày</option>
         </select>
-        <button class="chart-toggle-btn">Hiện/Ẩn</button>
+        <button class="chart-toggle-btn">📊 Xem</button>
       </div>
     </div>
     <div class="chart-wrapper" style="display: none;">
@@ -33,6 +33,7 @@ export function createTemperatureChart(container, deviceId, deviceType, token, g
   toggleBtn.addEventListener('click', () => {
     isVisible = !isVisible;
     chartWrapper.style.display = isVisible ? 'block' : 'none';
+    toggleBtn.textContent = isVisible ? '📉 Ẩn' : '📊 Xem';
     
     if (isVisible && !chart) {
       loadAndRenderChart();
@@ -40,7 +41,8 @@ export function createTemperatureChart(container, deviceId, deviceType, token, g
       chart.resize();
     }
   });
-  // Thay đổi khoảng thời gian hiển thị
+  
+  // Change time range
   rangeSelect.addEventListener('change', () => {
     currentRange = rangeSelect.value;
     if (isVisible) {
@@ -53,17 +55,22 @@ export function createTemperatureChart(container, deviceId, deviceType, token, g
       const historyData = await getTemperatureHistory(token, deviceId, { range: currentRange });
       
       if (!historyData.data || historyData.data.length === 0) {
-        chartWrapper.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">Chưa có dữ liệu</p>';
+        chartWrapper.innerHTML = `
+          <div style="text-align:center; padding:30px; color: var(--text-secondary);">
+            <div style="font-size: 32px; margin-bottom: 8px;">📭</div>
+            <div>Chưa có dữ liệu</div>
+          </div>
+        `;
         return;
       }
       
-      // Cập nhật tiêu đề theo khoảng thời gian
+      // Update title with time window
       const windowLabel = historyData.window || currentRange || '5d';
       if (titleEl) {
-        titleEl.textContent = `📊 Biểu đồ nhiệt độ (${windowLabel})`;
+        titleEl.textContent = `📈 Biểu đồ nhiệt độ (${windowLabel})`;
       }
       
-      // Format dữ liệu cho Chart.js (bao gồm ngày + giờ)
+      // Format data for Chart.js (including day + time)
       const labels = historyData.data.map(item => {
         const date = new Date(item.x);
         return date.toLocaleString('vi-VN', { 
@@ -75,33 +82,41 @@ export function createTemperatureChart(container, deviceId, deviceType, token, g
       
       const temperatures = historyData.data.map(item => item.y);
       
-      // Tạo canvas nếu chưa có
+      // Create canvas if not exists
       if (!chartWrapper.querySelector('canvas')) {
         chartWrapper.innerHTML = `<canvas id="chart-${deviceId}"></canvas>`;
       }
       
       const ctx = chartWrapper.querySelector(`#chart-${deviceId}`).getContext('2d');
       
-      // Xóa chart cũ nếu có
+      // Destroy old chart if exists
       if (chart) {
         chart.destroy();
       }
       
-      // Tạo chart mới
+      // Colors for the theme
+      const isStove = deviceType === 'stove_sim';
+      const lineColor = isStove ? '#e67e22' : '#1abc9c';
+      const bgColor = isStove ? 'rgba(230, 126, 34, 0.2)' : 'rgba(26, 188, 156, 0.2)';
+      
+      // Create new chart
       chart = new Chart(ctx, {
         type: 'line',
         data: {
           labels: labels,
           datasets: [{
-            label: deviceType === 'stove_sim' ? 'Nhiệt độ bếp (°C)' : 'Nhiệt độ tủ lạnh (°C)',
+            label: isStove ? '🍳 Nhiệt độ bếp (°C)' : '❄️ Nhiệt độ tủ lạnh (°C)',
             data: temperatures,
-            borderColor: deviceType === 'stove_sim' ? 'rgb(231, 76, 60)' : 'rgb(52, 152, 219)',
-            backgroundColor: deviceType === 'stove_sim' ? 'rgba(231, 76, 60, 0.1)' : 'rgba(52, 152, 219, 0.1)',
+            borderColor: lineColor,
+            backgroundColor: bgColor,
             borderWidth: 2,
             fill: true,
             tension: 0.4,
             pointRadius: 2,
-            pointHoverRadius: 4
+            pointHoverRadius: 6,
+            pointBackgroundColor: lineColor,
+            pointBorderColor: '#1a1a2e',
+            pointBorderWidth: 2
           }]
         },
         options: {
@@ -111,28 +126,79 @@ export function createTemperatureChart(container, deviceId, deviceType, token, g
           plugins: {
             legend: {
               display: true,
-              position: 'top'
+              position: 'top',
+              labels: {
+                color: '#eaeaea',
+                font: {
+                  family: "'Quicksand', sans-serif",
+                  weight: '600'
+                },
+                padding: 15
+              }
             },
             tooltip: {
               mode: 'index',
-              intersect: false
+              intersect: false,
+              backgroundColor: 'rgba(22, 33, 62, 0.95)',
+              titleColor: '#eaeaea',
+              bodyColor: '#a0a0a0',
+              borderColor: lineColor,
+              borderWidth: 1,
+              padding: 12,
+              cornerRadius: 8,
+              titleFont: {
+                family: "'Quicksand', sans-serif",
+                weight: '600'
+              },
+              bodyFont: {
+                family: "'Quicksand', sans-serif"
+              }
             }
           },
           scales: {
             y: {
               beginAtZero: false,
+              grid: {
+                color: 'rgba(255, 255, 255, 0.05)',
+                drawBorder: false
+              },
+              ticks: {
+                color: '#a0a0a0',
+                font: {
+                  family: "'Quicksand', sans-serif"
+                }
+              },
               title: {
                 display: true,
-                text: 'Nhiệt độ (°C)'
+                text: 'Nhiệt độ (°C)',
+                color: '#eaeaea',
+                font: {
+                  family: "'Quicksand', sans-serif",
+                  weight: '600'
+                }
               }
             },
             x: {
-              title: {
-                display: true,
-                text: 'Thời gian'
+              grid: {
+                color: 'rgba(255, 255, 255, 0.05)',
+                drawBorder: false
               },
               ticks: {
-                maxTicksLimit: 15 // Giới hạn tick để tránh quá dày
+                color: '#a0a0a0',
+                maxTicksLimit: 12,
+                font: {
+                  family: "'Quicksand', sans-serif",
+                  size: 10
+                }
+              },
+              title: {
+                display: true,
+                text: 'Thời gian',
+                color: '#eaeaea',
+                font: {
+                  family: "'Quicksand', sans-serif",
+                  weight: '600'
+                }
               }
             }
           },
@@ -144,7 +210,7 @@ export function createTemperatureChart(container, deviceId, deviceType, token, g
         }
       });
       
-      // Auto-resize khi window resize
+      // Auto-resize on window resize
       window.addEventListener('resize', () => {
         if (chart && isVisible) {
           chart.resize();
@@ -152,11 +218,16 @@ export function createTemperatureChart(container, deviceId, deviceType, token, g
       });
       
     } catch (error) {
-      chartWrapper.innerHTML = `<p style="text-align:center; color:#e74c3c; padding:20px;">Lỗi tải dữ liệu: ${error.message}</p>`;
+      chartWrapper.innerHTML = `
+        <div style="text-align:center; padding:30px; color: var(--danger);">
+          <div style="font-size: 32px; margin-bottom: 8px;">⚠️</div>
+          <div>Lỗi tải dữ liệu: ${error.message}</div>
+        </div>
+      `;
     }
   }
   
-  // Public method để refresh chart
+  // Public method to refresh chart
   chartContainer.refreshChart = () => {
     if (isVisible && chart) {
       loadAndRenderChart();
@@ -165,4 +236,3 @@ export function createTemperatureChart(container, deviceId, deviceType, token, g
   
   return chartContainer;
 }
-

@@ -74,10 +74,15 @@ export async function renderDashboard(container, token, { getDevices, sendComman
   container.innerHTML = `
     <div class="container">
       <div id="dashboard">
-        <h2>🔥 Bếp Thông Minh</h2>
-        <button id="manage-devices-btn" style="margin-bottom:15px; background:#9b59b6; width:100%">Quản lý Thiết bị</button>
-        <div id="device-list">Đang tải thiết bị...</div>
-        <button id="logout-btn" style="margin-top:20px; background:#95a5a6; width:100%">Đăng xuất</button>
+        <h2>🍳 Smart Kitchen</h2>
+        <button id="manage-devices-btn" style="margin-bottom:15px; background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%); width:100%">⚙️ Quản lý Thiết bị</button>
+        <div id="device-list">
+          <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+            <div style="font-size: 48px; margin-bottom: 16px;">🔄</div>
+            <div>Đang tải thiết bị...</div>
+          </div>
+        </div>
+        <button id="logout-btn" style="width:100%">🚪 Đăng xuất</button>
       </div>
     </div>
   `;
