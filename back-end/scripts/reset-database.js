@@ -28,7 +28,7 @@ async function resetDatabase() {
     console.log('👤 Creating user admin123...');
     const newUser = new User({
       username: 'admin123',
-      password: 'admin123', // Sẽ được hash bởi pre('save') hook trong User model
+      password: 'admin123', 
       role: 'admin'
     });
     await newUser.save();
