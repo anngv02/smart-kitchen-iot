@@ -4,7 +4,8 @@ const mqtt = require('mqtt');
 const BROKER_URL = 'mqtt://131.153.224.169'; 
 
 // Topic phải KHỚP với cái bạn vừa tạo trong Database (mqtt_topic_root)
-const DEVICE_TOPIC = 'home/kitchen/stove1';
+// Nhận topic từ command line argument hoặc environment variable
+const DEVICE_TOPIC = process.argv[2] || process.env.DEVICE_TOPIC || 'home/kitchen/stove1';
 
 // --- TRẠNG THÁI BẾP ẢO ---
 let state = {

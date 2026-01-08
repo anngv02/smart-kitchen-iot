@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const http = require('http');
 const { Server } = require("socket.io");
+const { exec } = require('child_process');
 
 const User = require('./models/User');
 const Device = require('./models/Device');
@@ -51,15 +52,16 @@ const deviceCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // Cache 5 phút
 const MAX_CACHE_SIZE = 100; // Giới hạn cache tối đa 100 devices
 
-async function getDeviceCached(deviceId) {
-  const cacheKey = `home/kitchen/${deviceId}`;
-  const cached = deviceCache.get(cacheKey);
+async function getDeviceCached(topicRoot) {
+  // topicRoot có thể là: "home/kitchen/stove1" hoặc bất kỳ format nào user đặt
+  const cached = deviceCache.get(topicRoot);
   
   if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
     return cached.device;
   }
   
-  const device = await Device.findOne({ mqtt_topic_root: cacheKey }).lean();
+  // Tìm device bằng mqtt_topic_root chính xác
+  const device = await Device.findOne({ mqtt_topic_root: topicRoot }).lean();
   if (device) {
     // Giới hạn cache size để tránh memory leak
     if (deviceCache.size >= MAX_CACHE_SIZE) {
@@ -68,7 +70,11 @@ async function getDeviceCached(deviceId) {
         .sort((a, b) => a[1].timestamp - b[1].timestamp)[0][0];
       deviceCache.delete(oldestKey);
     }
-    deviceCache.set(cacheKey, { device, timestamp: Date.now() });
+    deviceCache.set(topicRoot, { device, timestamp: Date.now() });
+    console.log(`✅ Found device: ${device.name} (${device.type}) for topic: ${topicRoot}`);
+  } else {
+    // Log để debug nếu không tìm thấy device
+    console.log(`⚠️  Device not found for topic: ${topicRoot}`);
   }
   
   return device;
@@ -106,45 +112,58 @@ mqttClient.on('message', async (topic, message) => {
   try {
     const msgString = message.toString();
     const data = JSON.parse(msgString);
-    const deviceId = topic.split('/')[2];
     
-    // Gửi realtime xuống Web
+    // Extract topic root từ MQTT topic
+    // Ví dụ: home/kitchen/stove1/status -> home/kitchen/stove1
+    // Hoặc: home/kitchen/myStove/status -> home/kitchen/myStove
+    const topicParts = topic.split('/');
+    const topicRoot = topicParts.slice(0, -1).join('/'); // Bỏ phần cuối (status/command)
+    const deviceId = topicParts[topicParts.length - 2]; // Phần trước status/command
+    
+    // Gửi realtime xuống Web (dùng deviceId để frontend match)
     io.emit('device_update', { deviceId, data });
     
     // ===== LOGIC 1: TỰ ĐỘNG TẮT BẾP KHI PHÁT HIỆN GAS =====
     setImmediate(async () => {
       try {
-        const device = await getDeviceCached(deviceId);
+        const device = await getDeviceCached(topicRoot);
         
         // Nếu là sensor_node và phát hiện GAS
         if (device && device.type === 'sensor_node' && data.gas === 'DETECTED') {
-          if (!gasDetected) {
+          // Tạo key riêng cho mỗi user để track gas detection
+          const userGasKey = `user_${device.user_id}_gas`;
+          if (!gasDetected || lastGasDetectionTime === null) {
             gasDetected = true;
             lastGasDetectionTime = new Date();
-            console.log('⚠️  GAS DETECTED! Tự động tắt tất cả bếp từ...');
+            console.log(`⚠️  GAS DETECTED for user ${device.user_id}! Tự động tắt tất cả bếp từ của user này...`);
             
-            // Tìm tất cả bếp từ và gửi lệnh tắt
-            const allDevices = await Device.find({ type: 'stove_sim' }).lean();
-            for (const stove of allDevices) {
+            // Chỉ tắt bếp từ của cùng user với sensor
+            const userStoves = await Device.find({ 
+              type: 'stove_sim', 
+              user_id: device.user_id 
+            }).lean();
+            
+            for (const stove of userStoves) {
               const stoveTopic = stove.mqtt_topic_root;
               const command = JSON.stringify({ cmd: 'POWER', val: 'OFF' });
               mqttClient.publish(`${stoveTopic}/command`, command);
-              console.log(`🔴 Đã gửi lệnh TẮT đến ${stove.name} (${stoveTopic})`);
+              console.log(`🔴 Đã gửi lệnh TẮT đến ${stove.name} (${stoveTopic}) của user ${device.user_id}`);
             }
             
-            // Thông báo qua Socket.IO
+            // Thông báo qua Socket.IO (chỉ gửi cho user đó)
             io.emit('safety_alert', {
               type: 'gas_detected',
+              userId: device.user_id.toString(),
               message: '⚠️ Phát hiện khí GAS! Đã tự động tắt tất cả bếp từ.',
               timestamp: new Date()
             });
           }
         } else if (device && device.type === 'sensor_node' && data.gas === 'SAFE') {
-          // Reset khi GAS an toàn
+          // Reset khi GAS an toàn (chỉ reset cho user đó)
           if (gasDetected) {
             gasDetected = false;
             lastGasDetectionTime = null;
-            console.log('✅ GAS SAFE - Đã reset trạng thái');
+            console.log(`✅ GAS SAFE for user ${device.user_id} - Đã reset trạng thái`);
           }
         }
       } catch (err) {
@@ -155,7 +174,7 @@ mqttClient.on('message', async (topic, message) => {
     // ===== LOGIC 2: TỰ ĐỘNG ĐÓNG TỦ LẠNH KHI NHIỆT ĐỘ CAO =====
     setImmediate(async () => {
       try {
-        const device = await getDeviceCached(deviceId);
+        const device = await getDeviceCached(topicRoot);
         
         if (device && device.type === 'fridge_sim') {
           const currentTemp = data.current_temp;
@@ -223,7 +242,7 @@ mqttClient.on('message', async (topic, message) => {
     setImmediate(async () => {
       try {
         // Tìm device từ cache (tránh query DB mỗi lần)
-        const device = await getDeviceCached(deviceId);
+        const device = await getDeviceCached(topicRoot);
         if (device && (device.type === 'stove_sim' || device.type === 'fridge_sim')) {
           let temperature = null;
           
@@ -291,7 +310,6 @@ app.post('/api/register', async (req, res) => {
     const existingUser = await User.findOne({ username });
     if (existingUser) return res.status(400).json({ msg: 'User đã tồn tại' });
 
-    // Lưu ý: Models/User.js phải bỏ 'next' trong pre('save') thì dòng dưới mới chạy được
     const newUser = new User({ username, password, role });
     await newUser.save(); 
     res.json({ msg: 'Tạo user thành công' });
@@ -317,21 +335,60 @@ app.post('/api/login', async (req, res) => {
 // 4. API Thêm thiết bị
 app.post('/api/devices', authMiddleware, async (req, res) => {
   try {
-    // Lưu ý: Models/Device.js phải có trường 'mqtt_topic_root' thay vì 'topic'
-    const newDevice = new Device(req.body);
+    // Tự động gán user_id từ token (không cho phép user tự set user_id)
+    // Convert string ID từ JWT thành MongoDB ObjectId
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    
+    const deviceData = {
+      ...req.body,
+      user_id: userId // Lấy user_id từ JWT token và convert sang ObjectId
+    };
+    
+    const newDevice = new Device(deviceData);
     await newDevice.save();
+    
+    // Xóa cache để đảm bảo device mới được nhận diện ngay
+    deviceCache.delete(deviceData.mqtt_topic_root);
+    
+    console.log(`✅ Device added: ${newDevice.name} (${newDevice.type}) with topic: ${newDevice.mqtt_topic_root}`);
+    
+    // Tự động khởi động simulator nếu là stove_sim hoặc fridge_sim
+    if (newDevice.type === 'stove_sim' || newDevice.type === 'fridge_sim') {
+      const scriptPath = path.join(__dirname, 'scripts', 'manage-simulators.js');
+      exec(`node ${scriptPath}`, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`❌ Failed to start simulator for ${newDevice.name}:`, error.message);
+        } else {
+          console.log(`✅ Simulator management script executed for ${newDevice.name}`);
+          if (stdout) console.log(stdout);
+        }
+      });
+    }
+    
     res.json(newDevice);
   } catch (err) {
+    // Handle duplicate key error (same mqtt_topic_root for same user)
+    if (err.code === 11000) {
+      return res.status(400).json({ error: 'Device with this topic already exists for your account' });
+    }
+    // Log lỗi chi tiết để debug
+    console.error('Error adding device:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// 5. API Lấy danh sách thiết bị
+// 5. API Lấy danh sách thiết bị (chỉ lấy devices của user hiện tại)
 app.get('/api/devices', authMiddleware, async (req, res) => {
   try {
-    const devices = await Device.find();
+    // Chỉ lấy devices của user hiện tại (từ JWT token)
+    // Convert string ID từ JWT thành MongoDB ObjectId
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const devices = await Device.find({ user_id: userId });
     res.json(devices);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    console.error('Error getting devices:', err);
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 // 6. API Cập nhật thiết bị (đổi tên)
@@ -341,16 +398,59 @@ app.put('/api/devices/:id', authMiddleware, async (req, res) => {
     const device = await Device.findById(id);
     if (!device) return res.status(404).json({ msg: 'Thiết bị không tồn tại' });
     
+    // Kiểm tra ownership: chỉ cho phép user sở hữu device mới được sửa
+    // Convert cả hai về string để so sánh
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    if (device.user_id.toString() !== userId.toString()) {
+      return res.status(403).json({ msg: 'Bạn không có quyền sửa thiết bị này' });
+    }
+    
     // Không cho phép sửa sensor_node
     if (device.type === 'sensor_node') {
       return res.status(403).json({ msg: 'Không thể sửa thiết bị cảm biến' });
     }
     
-    // Chỉ cho phép cập nhật tên
-    if (req.body.name) {
+    // Cho phép cập nhật tên và mqtt_topic_root
+    let hasChanges = false;
+    if (req.body.name && req.body.name !== device.name) {
       device.name = req.body.name;
+      hasChanges = true;
+    }
+    
+    if (req.body.mqtt_topic_root && req.body.mqtt_topic_root !== device.mqtt_topic_root) {
+      // Validate topic format
+      if (!req.body.mqtt_topic_root.match(/^[a-zA-Z0-9\/_-]+$/)) {
+        return res.status(400).json({ msg: 'Topic không hợp lệ! Chỉ được chứa chữ cái, số, dấu gạch chéo (/), gạch dưới (_) và gạch ngang (-)' });
+      }
+      
+      // Kiểm tra xem topic mới đã tồn tại cho user này chưa
+      const existingDevice = await Device.findOne({ 
+        mqtt_topic_root: req.body.mqtt_topic_root,
+        user_id: userId,
+        _id: { $ne: id } // Loại trừ device hiện tại
+      });
+      
+      if (existingDevice) {
+        return res.status(400).json({ msg: 'Topic này đã được sử dụng bởi thiết bị khác của bạn' });
+      }
+      
+      // Xóa cache của topic cũ (nếu có trong cache)
+      const oldTopic = device.mqtt_topic_root;
+      // Cache key format: home/kitchen/{deviceId}
+      // Nếu topic cũ là home/kitchen/stove1, cache key sẽ là home/kitchen/stove1
+      // Nhưng getDeviceCached sử dụng deviceId từ topic, nên cần extract deviceId
+      const oldDeviceId = oldTopic.split('/').pop();
+      const oldCacheKey = `home/kitchen/${oldDeviceId}`;
+      deviceCache.delete(oldCacheKey);
+      
+      device.mqtt_topic_root = req.body.mqtt_topic_root;
+      hasChanges = true;
+    }
+    
+    if (hasChanges) {
       await device.save();
     }
+    
     res.json(device);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -364,12 +464,36 @@ app.delete('/api/devices/:id', authMiddleware, async (req, res) => {
     const device = await Device.findById(id);
     if (!device) return res.status(404).json({ msg: 'Thiết bị không tồn tại' });
     
+    // Kiểm tra ownership: chỉ cho phép user sở hữu device mới được xóa
+    // Convert cả hai về string để so sánh
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    if (device.user_id.toString() !== userId.toString()) {
+      return res.status(403).json({ msg: 'Bạn không có quyền xóa thiết bị này' });
+    }
+    
     // Không cho phép xóa sensor_node
     if (device.type === 'sensor_node') {
       return res.status(403).json({ msg: 'Không thể xóa thiết bị cảm biến' });
     }
     
+    const deviceName = device.name;
+    const deviceType = device.type;
+    
     await Device.findByIdAndDelete(id);
+    
+    // Tự động dừng simulator nếu là stove_sim hoặc fridge_sim
+    if (deviceType === 'stove_sim' || deviceType === 'fridge_sim') {
+      const scriptPath = path.join(__dirname, 'scripts', 'manage-simulators.js');
+      exec(`node ${scriptPath}`, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`❌ Failed to stop simulator for ${deviceName}:`, error.message);
+        } else {
+          console.log(`✅ Simulator stopped for deleted device: ${deviceName}`);
+          if (stdout) console.log(stdout);
+        }
+      });
+    }
+    
     res.json({ msg: 'Đã xóa thiết bị' });
   } catch (err) {
     res.status(500).json({ error: err.message });

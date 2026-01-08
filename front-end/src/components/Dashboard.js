@@ -11,7 +11,7 @@ let isRendering = false;
 
 async function loadAndRenderDevices(container, token, { getDevices, sendCommand, onDeviceUpdate }) {
   const list = container.querySelector('#device-list');
-  
+
   try {
     const devices = await getDevices(token);
     list.innerHTML = '';
@@ -52,10 +52,10 @@ async function loadAndRenderDevices(container, token, { getDevices, sendCommand,
     // subscribe updates
     if (currentOnDeviceUpdate) {
       currentOnDeviceUpdate((msg) => {
-        const { deviceId, data } = msg;
+      const { deviceId, data } = msg;
         const card = currentCards.get(deviceId);
-        if (card && card.updateState) card.updateState(data);
-      });
+      if (card && card.updateState) card.updateState(data);
+    });
     }
 
   } catch (e) {

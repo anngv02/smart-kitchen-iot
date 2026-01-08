@@ -2,7 +2,8 @@ const mqtt = require('mqtt');
 
 // --- CẤU HÌNH ---
 const BROKER_URL = 'mqtt://131.153.224.169'; // <--- THAY IP VPS CỦA BẠN
-const DEVICE_TOPIC = 'home/kitchen/fridge1';
+// Nhận topic từ command line argument hoặc environment variable
+const DEVICE_TOPIC = process.argv[2] || process.env.DEVICE_TOPIC || 'home/kitchen/fridge1';
 
 let state = {
     current_temp: 5.0,  // Nhiệt độ hiện tại

@@ -31,8 +31,9 @@ export function createDeviceManager(token, { addDevice, updateDevice, deleteDevi
             </select>
           </div>
           <div class="form-group">
-            <label>MQTT Topic (tự động tạo):</label>
-            <input type="text" id="device-topic" readonly placeholder="home/kitchen/...">
+            <label>MQTT Topic:</label>
+            <input type="text" id="device-topic" placeholder="home/kitchen/..." style="background-color: #fff;">
+            <small style="color: #666; font-size: 12px;">Topic sẽ được tạo tự động, nhưng bạn có thể chỉnh sửa nếu cần</small>
           </div>
           <button type="submit" class="btn-primary">Thêm Thiết bị</button>
         </form>
@@ -156,23 +157,40 @@ export function createDeviceManager(token, { addDevice, updateDevice, deleteDevi
           <div class="device-info">
             <strong>${dev.name}</strong>
             <span class="device-type">${getTypeLabel(dev.type)}</span>
+            <div style="margin-top: 5px; font-size: 12px; color: #666;">
+              <strong>Topic:</strong> <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">${dev.mqtt_topic_root}</code>
+            </div>
           </div>
           ${!isSensor ? `
             <div class="device-actions">
-              <button class="btn-edit" data-id="${dev._id}" data-name="${dev.name}">Đổi tên</button>
+              <button class="btn-edit-name" data-id="${dev._id}" data-name="${dev.name}">Đổi tên</button>
+              <button class="btn-edit-topic" data-id="${dev._id}" data-topic="${dev.mqtt_topic_root}">Đổi Topic</button>
               <button class="btn-delete" data-id="${dev._id}">Xóa</button>
             </div>
           ` : '<span class="readonly-badge">Chỉ đọc</span>'}
         `;
         
         if (!isSensor) {
-          const editBtn = item.querySelector('.btn-edit');
+          const editNameBtn = item.querySelector('.btn-edit-name');
+          const editTopicBtn = item.querySelector('.btn-edit-topic');
           const deleteBtn = item.querySelector('.btn-delete');
           
-          editBtn.addEventListener('click', () => {
+          editNameBtn.addEventListener('click', () => {
             const newName = prompt('Nhập tên mới:', dev.name);
             if (newName && newName.trim() && newName !== dev.name) {
               updateDeviceName(dev._id, newName.trim());
+            }
+          });
+          
+          editTopicBtn.addEventListener('click', () => {
+            const newTopic = prompt('Nhập MQTT Topic mới:', dev.mqtt_topic_root);
+            if (newTopic && newTopic.trim() && newTopic !== dev.mqtt_topic_root) {
+              // Validate topic format
+              if (!newTopic.match(/^[a-zA-Z0-9\/_-]+$/)) {
+                alert('Topic không hợp lệ! Chỉ được chứa chữ cái, số, dấu gạch chéo (/), gạch dưới (_) và gạch ngang (-)');
+                return;
+              }
+              updateDeviceTopic(dev._id, newTopic.trim());
             }
           });
           
@@ -198,6 +216,17 @@ export function createDeviceManager(token, { addDevice, updateDevice, deleteDevi
     try {
       await updateDevice(token, id, { name: newName });
       alert('Đổi tên thành công!');
+      loadDeviceList();
+      if (onDeviceChange) onDeviceChange();
+    } catch (err) {
+      alert('Lỗi: ' + err.message);
+    }
+  }
+
+  async function updateDeviceTopic(id, newTopic) {
+    try {
+      await updateDevice(token, id, { mqtt_topic_root: newTopic });
+      alert('Đổi Topic thành công!');
       loadDeviceList();
       if (onDeviceChange) onDeviceChange();
     } catch (err) {

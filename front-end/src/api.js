@@ -11,7 +11,10 @@ export async function login(username, password) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
-    if (!res.ok) throw new Error('Login failed');
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.msg || 'Login failed');
+    }
     return res.json();
   } catch (e) {
     // Local dev fallback (no server): accept admin/admin
@@ -19,6 +22,23 @@ export async function login(username, password) {
       if (username === 'admin' && password === 'admin') return { token: 'local-dev-token' };
       throw new Error('Invalid credentials (local mock)');
     }
+    throw e;
+  }
+}
+
+export async function register(username, password) {
+  try {
+    const res = await fetch(`${API_URL}/api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role: 'user' })
+    });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.msg || errorData.error || 'Registration failed');
+    }
+    return res.json();
+  } catch (e) {
     throw e;
   }
 }

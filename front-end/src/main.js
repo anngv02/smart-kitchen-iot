@@ -1,4 +1,4 @@
-import { login as apiLogin, getDevices, sendCommand, getTemperatureHistory } from './api.js';
+import { login as apiLogin, register as apiRegister, getDevices, sendCommand, getTemperatureHistory } from './api.js';
 import { initSocket } from './socket.js';
 import { renderLogin } from './components/Login.js';
 import { renderDashboard } from './components/Dashboard.js';
@@ -15,11 +15,22 @@ async function start() {
 
 function showLogin() {
   isDashboardShown = false;
-  renderLogin(root, async (user, pass) => {
-    const data = await apiLogin(user, pass);
-    localStorage.setItem('token', data.token);
-    showDashboard(data.token);
-  });
+  renderLogin(root, 
+    // onLogin callback
+    async (user, pass) => {
+      const data = await apiLogin(user, pass);
+      localStorage.setItem('token', data.token);
+      showDashboard(data.token);
+    },
+    // onRegister callback
+    async (user, pass) => {
+      await apiRegister(user, pass);
+      // After successful registration, automatically log in
+      const data = await apiLogin(user, pass);
+      localStorage.setItem('token', data.token);
+      showDashboard(data.token);
+    }
+  );
 }
 
 function showDashboard(token) {
