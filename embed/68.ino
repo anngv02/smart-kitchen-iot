@@ -4,57 +4,63 @@
 #include <UniversalTelegramBot.h>
 #include <ArduinoJson.h>
 
-// --- CẤU HÌNH WIFI & MQTT ---
-// const char* ssid = "My Mom";
-// const char* password = "hachicutedangyeu10diem";
+// ==========================================
+// 1. CẤU HÌNH HỆ THỐNG
+// ==========================================
+
+// --- WIFI & MQTT ---
 const char* ssid = "Annez";
 const char* password = "12345679";
-// const char* mqtt_server = "10.17.13.220"; // Thay bằng IP máy
-// const char* mqtt_server = "10.203.190.47";
 const char* mqtt_server = "131.153.224.169"; 
+const char* topic_status = "home/kitchen/sensor1/status";
 
-// --- CẤU HÌNH TELEGRAM ---
+// --- TELEGRAM ---
 #define BOTtoken "8596919219:AAEiuHZbmkynjqQ_QvCVHChH5vgtTJOLy9k"  
 #define CHAT_ID "6408676530"
 
-// --- ĐỊNH NGHĨA CHÂN ---
+// --- PHẦN CỨNG (BỎ CHÂN 33) ---
 #define PIN_GAS 32
 #define PIN_FLAME 35
 #define PIN_LED 26
 #define PIN_BUZZER 27
 
-// [QUAN TRỌNG] Topic phải khớp với Database MongoDB
-const char* topic_status = "home/kitchen/sensor1/status";
+// --- LOGIC SLIDING WINDOW ---
+#define WINDOW_SIZE 10    // Số lượng mẫu trong cửa sổ
+#define ALARM_THRESHOLD 8 // Ngưỡng kích hoạt (8/10 mẫu = 1)
 
-// --- 2. BIẾN TOÀN CỤC (SHARED RESOURCE) ---
-volatile bool g_isGas = false;
-volatile bool g_isFire = false;
-volatile bool g_isDanger = false;
+// ==========================================
+// 2. BIẾN TOÀN CỤC (SHARED RESOURCES)
+// ==========================================
+// Dùng volatile để báo cho trình biên dịch biết biến này
+// có thể bị thay đổi bởi các Task khác nhau bất cứ lúc nào
+volatile bool g_finalGasState = false;  // Trạng thái chốt sau khi qua Window
+volatile bool g_finalFireState = false; // Trạng thái chốt sau khi qua Window
+volatile bool g_isDanger = false;       // Tổng hợp nguy hiểm
 
-// --- 3. KHỞI TẠO OBJECT ---
+// ==========================================
+// 3. KHỞI TẠO OBJECT
+// ==========================================
 WiFiClient espClient;
 PubSubClient client(espClient);
 WiFiClientSecure secured_client;
 UniversalTelegramBot bot(BOTtoken, secured_client);
 
-// Handle cho các Task
 TaskHandle_t TaskSensorHandle;
 TaskHandle_t TaskMQTTHandle;
 TaskHandle_t TaskTelegramHandle;
 
-// --- 4. HÀM HỖ TRỢ ---
+// ==========================================
+// 4. CÁC HÀM HỖ TRỢ KẾT NỐI
+// ==========================================
 void setup_wifi() {
   delay(10);
   Serial.print("Connecting to WiFi: ");
   Serial.println(ssid);
-  
   WiFi.begin(ssid, password);
-  
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  
   Serial.println("\nWiFi Connected");
   secured_client.setInsecure(); 
 }
@@ -62,40 +68,67 @@ void setup_wifi() {
 void reconnect_mqtt() {
   while (!client.connected()) {
     Serial.print("MQTT connecting...");
-    // [QUAN TRỌNG] Client ID phải unique
-    if (client.connect("ESP32_Sensor_Node")) { 
+    if (client.connect("ESP32_Edge_Node")) { 
       Serial.println("connected");
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
-      // Dùng vTaskDelay để không chặn các task khác khi đang cố reconnect
       vTaskDelay(5000 / portTICK_PERIOD_MS); 
     }
   }
 }
 
 // ==========================================
-// TASK 1: ĐỌC CẢM BIẾN & XỬ LÝ TẠI CHỖ (Ưu tiên cao nhất)
+// TASK 1: BỘ NÃO XỬ LÝ (EDGE COMPUTING)
+// Nhiệm vụ: Đọc cảm biến -> Lọc nhiễu (Window) -> Ra quyết định -> Cập nhật biến Global
 // ==========================================
 void TaskSensor(void *pvParameters) {
   (void) pvParameters;
 
+  // Cấu hình chân
   pinMode(PIN_GAS, INPUT);
   pinMode(PIN_FLAME, INPUT);
   pinMode(PIN_LED, OUTPUT);
   pinMode(PIN_BUZZER, OUTPUT);
 
+  // Khởi tạo bộ nhớ cho cửa sổ trượt
+  int gasWindow[WINDOW_SIZE] = {0};
+  int fireWindow[WINDOW_SIZE] = {0};
+  int index = 0;
+  int gasSum = 0;
+  int fireSum = 0;
+
   for (;;) { 
-    // Đọc cảm biến (Giả sử LOW là kích hoạt - Active Low)
-    int gasState = digitalRead(PIN_GAS);
-    int fireState = digitalRead(PIN_FLAME);
+    // --- BƯỚC 1: ĐỌC DỮ LIỆU THÔ ---
+    // Chuyển đổi tín hiệu: LOW (0V) là có biến -> đổi thành số 1 để tính toán
+    int rawGas = (digitalRead(PIN_GAS) == LOW) ? 1 : 0;
+    int rawFire = (digitalRead(PIN_FLAME) == LOW) ? 1 : 0;
 
-    // Cập nhật biến toàn cục
-    g_isGas = (gasState == LOW);
-    g_isFire = (fireState == LOW);
-    g_isDanger = g_isGas || g_isFire;
+    // --- BƯỚC 2: THUẬT TOÁN SLIDING WINDOW ---
+    // Trừ giá trị cũ nhất ra khỏi tổng
+    gasSum -= gasWindow[index];
+    fireSum -= fireWindow[index];
 
-    // Xử lý còi đèn ngay lập tức
+    // Ghi đè giá trị mới vào vị trí hiện tại
+    gasWindow[index] = rawGas;
+    fireWindow[index] = rawFire;
+
+    // Cộng giá trị mới vào tổng
+    gasSum += gasWindow[index];
+    fireSum += fireWindow[index];
+
+    // Di chuyển chỉ số vòng tròn (0 -> 9 -> 0...)
+    index = (index + 1) % WINDOW_SIZE;
+
+    bool isGasConfirmed = (gasSum >= ALARM_THRESHOLD);
+    bool isFireConfirmed = (fireSum >= ALARM_THRESHOLD);
+
+    // Cập nhật vào biến toàn cục để các Task khác dùng
+    g_finalGasState = isGasConfirmed;
+    g_finalFireState = isFireConfirmed;
+    g_isDanger = g_finalGasState || g_finalFireState;
+
+    // --- BƯỚC 4: ĐIỀU KHIỂN TẠI CHỖ (LOA/ĐÈN) ---
     if (g_isDanger) {
       digitalWrite(PIN_LED, HIGH);
       digitalWrite(PIN_BUZZER, HIGH);
@@ -104,82 +137,76 @@ void TaskSensor(void *pvParameters) {
       digitalWrite(PIN_BUZZER, LOW);
     }
 
-    // Delay 100ms
+    // Tần số lấy mẫu: 100ms 
     vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
 
 // ==========================================
-// TASK 2: GỬI DATA MQTT (Ưu tiên trung bình)
+// TASK 2: NGƯỜI ĐƯA TIN (MQTT)
+// Nhiệm vụ: Lấy kết quả từ TaskSensor -> Gửi lên Server
 // ==========================================
 void TaskMQTT(void *pvParameters) {
   (void) pvParameters;
-  
   client.setServer(mqtt_server, 1883);
 
   for (;;) {
     if (WiFi.status() == WL_CONNECTED) {
-      if (!client.connected()) {
-        reconnect_mqtt();
-      }
+      if (!client.connected()) reconnect_mqtt();
       client.loop();
 
       static unsigned long lastMsg = 0;
       unsigned long now = millis();
       
-      // Gửi data mỗi 2 giây
+      // Gửi định kỳ mỗi 2 giây
       if (now - lastMsg > 2000) {
         lastMsg = now;
         
-        // [QUAN TRỌNG] Format JSON theo chuẩn Web Dashboard mong đợi
-        // "DETECTED" -> Màu đỏ, "SAFE" -> Màu xanh
+        // --- TẠO JSON TỪ KẾT QUẢ ĐÃ XỬ LÝ ---
+        // Lưu ý: Dùng g_finalGasState (đã qua Window) chứ không đọc trực tiếp digitalRead
         String payload = "{";
-        payload += "\"gas\": \"" + String(g_isGas ? "DETECTED" : "SAFE") + "\",";
-        payload += "\"fire\": \"" + String(g_isFire ? "DETECTED" : "SAFE") + "\"";
+        payload += "\"gas\": \"" + String(g_finalGasState ? "DETECTED" : "SAFE") + "\",";
+        payload += "\"fire\": \"" + String(g_finalFireState ? "DETECTED" : "SAFE") + "\"";
         payload += "}";
         
         client.publish(topic_status, payload.c_str());
-        Serial.println("[MQTT] Published: " + payload);
+        // Serial.println("Sent: " + payload); // Debug
       }
     }
-    
+    // Delay nhỏ để nhường CPU cho các Task khác
     vTaskDelay(10 / portTICK_PERIOD_MS);
   }
 }
 
 // ==========================================
-// TASK 3: GỬI TELEGRAM (Ưu tiên thấp, Stack lớn)
+// TASK 3: CỨU HỘ (TELEGRAM)
+// Nhiệm vụ: Gửi tin nhắn khẩn cấp khi g_isDanger bật
 // ==========================================
 void TaskTelegram(void *pvParameters) {
   (void) pvParameters;
-
-  // Gửi tin nhắn khởi động
-  bot.sendMessage(CHAT_ID, "🚀 Cụm Cảm Biến Bếp (ESP32) đã online!", "");
+  bot.sendMessage(CHAT_ID, "🚀 Hệ thống Edge Monitor đã khởi động!", "");
 
   unsigned long lastTelegramTime = 0;
-  const unsigned long telegramDelay = 15000; // 15s cooldown để tránh spam
+  const unsigned long telegramDelay = 15000;
 
   for (;;) {
+    // Chỉ kiểm tra nếu Sensor báo nguy hiểm
     if (g_isDanger) {
       unsigned long now = millis();
       if (now - lastTelegramTime > telegramDelay) {
         
-        Serial.println("[TELEGRAM] Preparing message...");
-        String message = "⚠️ CẢNH BÁO KHẨN CẤP!\n";
-        message += "📍 Vị trí: Nhà Bếp\n";
-        if (g_isGas) message += "🔥 Phát hiện: KHÍ GAS RÒ RỈ!\n";
-        if (g_isFire) message += "🔥 Phát hiện: CÓ LỬA!\n";
-        message += "Hãy kiểm tra ngay lập tức!";
+        String message = "⚠️ CẢNH BÁO!\n";
+        message += "📍 Nhà Bếp\n";
+        
+        // Logic tin nhắn dựa trên kết quả phân tích
+        if (g_finalGasState) message += "🔥 KHÍ GAS RÒ RỈ !\n";
+        if (g_finalFireState) message += "🔥 CÓ LỬA !\n";
         
         if (bot.sendMessage(CHAT_ID, message, "")) {
-           Serial.println("[TELEGRAM] Sent successfully");
            lastTelegramTime = now;
-        } else {
-           Serial.println("[TELEGRAM] Failed to send");
         }
       }
     }
-
     // Kiểm tra mỗi 1 giây
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
@@ -190,24 +217,20 @@ void TaskTelegram(void *pvParameters) {
 // ==========================================
 void setup() {
   Serial.begin(115200);
-  
-  // Kết nối Wifi trước khi chạy task
   setup_wifi();
 
-  Serial.println("Creating FreeRTOS Tasks...");
+  Serial.println("Khoi tao FreeRTOS Tasks...");
 
-  // 1. Task Sensor (Ưu tiên cao nhất)
-  xTaskCreate(TaskSensor, "Sensor_Task", 2048, NULL, 2, &TaskSensorHandle);
-
-  // 2. Task MQTT (Ưu tiên trung bình)
-  xTaskCreate(TaskMQTT, "MQTT_Task", 4096, NULL, 1, &TaskMQTTHandle);
-
-  // 3. Task Telegram (Ưu tiên thấp nhất - Stack lớn 10KB cho SSL)
-  xTaskCreate(TaskTelegram, "Telegram_Task", 10240, NULL, 0, &TaskTelegramHandle);
+  // Ưu tiên: Sensor (2 - Cao nhất) > MQTT (1) > Telegram (0)
+  
+  xTaskCreate(TaskSensor,   "Sensor_Processing", 4096, NULL, 2, &TaskSensorHandle);
+  xTaskCreate(TaskMQTT,     "MQTT_Reporting",    4096, NULL, 1, &TaskMQTTHandle);
+  xTaskCreate(TaskTelegram, "Telegram_Alert",    10240, NULL, 0, &TaskTelegramHandle); 
   
   Serial.println("System Ready!");
 }
 
 void loop() {
-  vTaskDelete(NULL); // Xóa loop mặc định
+  // Loop để trống vì FreeRTOS đã quản lý mọi thứ
+  vTaskDelete(NULL); 
 }

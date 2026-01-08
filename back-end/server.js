@@ -101,7 +101,7 @@ const mqttClient = mqtt.connect(MQTT_HOST);
 // Track trạng thái GAS và tủ lạnh để tự động xử lý
 let gasDetected = false;
 let lastGasDetectionTime = null;
-const f                                                                           s = new Map(); // deviceId -> { temp: number, door: string, highTempStartTime: Date | null }
+const fridgeStatus = new Map(); // deviceId -> { temp: number, door: string, highTempStartTime: Date | null }
 
 mqttClient.on('connect', () => {
   console.log('✅ MQTT Connected');
