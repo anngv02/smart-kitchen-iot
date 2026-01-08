@@ -75,7 +75,7 @@ export async function renderDashboard(container, token, { getDevices, sendComman
     <div class="container">
       <div id="dashboard">
         <h2>🍳 Smart Kitchen</h2>
-        <button id="manage-devices-btn" style="margin-bottom:15px; background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%); width:100%">⚙️ Quản lý Thiết bị</button>
+        <button id="manage-devices-btn" style="margin-bottom:15px; background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%); width:100%">Quản lý Thiết bị</button>
         <div id="device-list">
           <div style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
             <div style="font-size: 48px; margin-bottom: 16px;">🔄</div>

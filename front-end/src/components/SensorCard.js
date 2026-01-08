@@ -7,7 +7,7 @@ export function createSensorCard(dev) {
   card.innerHTML = `
     <h3>🚨 ${dev.name}</h3>
     <div class="status-row">
-      <span>💨 Khí Gas:</span>
+      <span>💨 Khói:</span>
       <strong id="gas-${devId}" class="status-safe">SAFE</strong>
     </div>
     <div class="status-row">

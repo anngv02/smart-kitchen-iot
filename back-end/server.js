@@ -193,12 +193,12 @@ mqttClient.on('message', async (topic, message) => {
             const status = fridgeStatus.get(deviceId);
             const now = new Date();
             
-            // Nếu nhiệt độ > 15°C và cửa đang mở
-            if (currentTemp > 15 && doorStatus === 'OPEN') {
+            // Nếu cửa đang mở
+            if (doorStatus === 'OPEN') {
               // Bắt đầu đếm thời gian
               if (!status.highTempStartTime) {
                 status.highTempStartTime = now;
-                console.log(`🌡️  Tủ lạnh ${deviceId}: Nhiệt độ ${currentTemp}°C > 15°C, cửa mở. Bắt đầu đếm 15 phút...`);
+                console.log(`🌡️  Tủ lạnh ${deviceId}: cửa mở. Bắt đầu đếm 15 phút...`);
               } else {
                 // Kiểm tra đã qua 15 phút chưa
                 const elapsedMinutes = (now - status.highTempStartTime) / (60 * 1000);
@@ -207,7 +207,7 @@ mqttClient.on('message', async (topic, message) => {
                   const fridgeTopic = device.mqtt_topic_root;
                   const command = JSON.stringify({ cmd: 'SET_DOOR', val: 'CLOSED' });
                   mqttClient.publish(`${fridgeTopic}/command`, command);
-                  console.log(`❄️  Tự động đóng cửa tủ lạnh ${device.name} (${deviceId}) - Nhiệt độ ${currentTemp}°C > 15°C trong ${elapsedMinutes.toFixed(1)} phút`);
+                  console.log(`❄️  Tự động đóng cửa tủ lạnh ${device.name} (${deviceId}) trong ${elapsedMinutes.toFixed(1)} phút`);
                   
                   // Reset timer
                   status.highTempStartTime = null;
@@ -218,7 +218,7 @@ mqttClient.on('message', async (topic, message) => {
                     type: 'fridge_auto_close',
                     deviceId: deviceId,
                     deviceName: device.name,
-                    message: `Tủ lạnh ${device.name} đã tự động đóng cửa do nhiệt độ cao (${currentTemp}°C) trong 15 phút.`,
+                    message: `Tủ lạnh ${device.name} đã tự động đóng cửa do mở cửa trong 15 phút.`,
                     timestamp: now
                   });
                 }
